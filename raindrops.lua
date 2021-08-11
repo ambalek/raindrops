@@ -1,4 +1,4 @@
--- luacheck: globals engine clock util screen softcut enc key audio init
+-- luacheck: globals engine clock util screen softcut enc key audio init redraw
 -- 𝔯𝔞𝔦𝔫𝔡𝔯𝔬𝔭𝔰
 local MusicUtil = require "musicutil"
 
@@ -223,7 +223,7 @@ local function hz_to_width(hz)
   return math.floor(((hz / highest_pitch) * (max - min)) + 0.5)
 end
 
-local function redraw()
+function redraw()
   screen.clear()
   local margin = 30
   if anim_state.change_one.active then
