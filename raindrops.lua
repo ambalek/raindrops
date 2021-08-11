@@ -13,7 +13,7 @@ local rates = { 0.5, 1.0, 2.0, -0.5, -1.0, -2.0 }
 local screen_width = 128
 local screen_height = 64
 local longest_note = 16
-local highest_pitch = 1
+local lowest_gain = 0.3
 local sequencer1 = nil
 local sequencer2 = nil
 local scales = { "Minor Pentatonic", "Major Pentatonic", "Mixolydian", "Phrygian" }
@@ -134,28 +134,41 @@ local function make_scale_options()
   }
 end
 
+local function get_chance(use_chance)
+  if use_chance == true then return math.random() else return 1 end
+end
+
+local function random_note(scale, use_chance)
+  return {
+    hz = MusicUtil.note_num_to_freq(scale[math.random(1, #scale - max_high_notes)]),
+    length = math.random(2, 8),
+    pan = math.random(),
+    gain = util.clamp(lowest_gain + math.random(), 0, 1),
+    chance = get_chance(use_chance)
+  }
+end
+
 local function generate_sequences()
-  highest_pitch = 1
   local scale1 = scale_options[1]
   local scale2 = scale_options[2]
   return {
     {
-      { hz = MusicUtil.note_num_to_freq(scale1[math.random(1, #scale1 - max_high_notes)]), length = math.random(2, 8) },
-      { hz = MusicUtil.note_num_to_freq(scale1[math.random(1, #scale1 - max_high_notes)]), length = math.random(2, 4) },
-      { hz = MusicUtil.note_num_to_freq(scale1[math.random(1, #scale1 - max_high_notes)]), length = math.random(1, 6) },
-      { hz = MusicUtil.note_num_to_freq(scale1[math.random(1, #scale1 - max_high_notes)]), length = math.random(2, 6) },
-      { hz = MusicUtil.note_num_to_freq(scale1[math.random(1, #scale1 - max_high_notes)]), length = math.random(1, 4) },
-      { hz = MusicUtil.note_num_to_freq(scale1[math.random(1, #scale1 - max_high_notes)]), length = math.random(1, 4) },
-      { hz = MusicUtil.note_num_to_freq(scale1[math.random(1, #scale1 - max_high_notes)]), length = math.random(1, 8) },
+      random_note(scale1),
+      random_note(scale1, true),
+      random_note(scale1),
+      random_note(scale1),
+      random_note(scale1),
+      random_note(scale1, true),
+      random_note(scale1),
     },
     {
-      { hz = MusicUtil.note_num_to_freq(scale2[math.random(1, #scale2)]), length = math.random(2, 4) },
-      { hz = MusicUtil.note_num_to_freq(scale2[math.random(1, #scale2)]), length = math.random(2, 6) },
-      { hz = MusicUtil.note_num_to_freq(scale2[math.random(1, #scale2)]), length = math.random(1, 6) },
-      { hz = MusicUtil.note_num_to_freq(scale2[math.random(1, #scale2)]), length = math.random(2, 4) },
-      { hz = MusicUtil.note_num_to_freq(scale2[math.random(1, #scale2)]), length = math.random(1, 6) },
-      { hz = MusicUtil.note_num_to_freq(scale2[math.random(1, #scale2)]), length = math.random(2, 6) },
-      { hz = MusicUtil.note_num_to_freq(scale2[math.random(1, #scale2)]), length = math.random(4, 6) },
+      random_note(scale2),
+      random_note(scale2),
+      random_note(scale2, true),
+      random_note(scale2),
+      random_note(scale2),
+      random_note(scale2, true),
+      random_note(scale2),
     },
   }
 end
@@ -175,15 +188,16 @@ local function change_one_note()
   )
 end
 
-local function played_note(d, i, hz, length)
+local function played_note(d, i, note)
   if played_notes[d][i] == nil then
-    played_notes[d][i] = { hz = hz, length = length }
+    played_notes[d][i] = { hz = note.hz, length = note.length, gain = note.gain, fade = 0 }
   else
-    played_notes[d][i].hz = hz
-    played_notes[d][i].length = length
+    played_notes[d][i].hz = note.hz
+    played_notes[d][i].length = note.length
+    played_notes[d][i].gain = note.gain
+    played_notes[d][i].fade = 0
   end
   played_notes[d][i].x = nil
-  if hz > highest_pitch then highest_pitch = hz end
 end
 
 local function tick(d, i, s)
@@ -197,11 +211,14 @@ local function tick(d, i, s)
       clock.sync(s)
       note.ticks = note.ticks - 1
       if note.ticks == 0 then
-        engine.pan(math.random())
+        engine.pan(note.pan)
         engine.release(note.length)
-        engine.hz(note.hz)
+        engine.gain(note.gain)
+        if math.random() < note.chance then
+          engine.hz(note.hz)
+          played_note(d, i, note)
+        end
         note.ticks = note.length
-        played_note(d, i, note.hz, note.length)
         i = i + 1
         if i > #notes then
           i = 1
@@ -211,20 +228,24 @@ local function tick(d, i, s)
   end
 end
 
-local function length_to_level(length)
-  local min = 3
-  local max = 15
-  return math.floor(((length / longest_note) * (max - min)) + 0.5) + min
+local function note_to_level(note)
+  return math.floor(5 + (note.gain * 11) - note.fade)
 end
 
-local function hz_to_width(hz)
-  local min = 1
-  local max = 4
-  return math.floor(((hz / highest_pitch) * (max - min)) + 0.5)
+local function note_to_line_width(note)
+  return math.floor(note.gain * 3)
+end
+
+local function ripple(note, line_width, circle_width, level)
+  screen.line_width(line_width + note_to_line_width(note))
+  screen.level(level)
+  screen.circle(note.x, note.y, note.length + circle_width)
+  screen.stroke()
 end
 
 function redraw()
   screen.clear()
+  screen.blend_mode(5)
   local margin = 30
   if anim_state.change_one.active then
     screen.level(math.floor(anim_state.change_one.level + 0.5))
@@ -249,12 +270,16 @@ function redraw()
           note.x = math.floor(margin + math.random() * (screen_width)) - margin
           note.y = math.floor(margin + math.random() * (screen_height)) - margin
         end
-        screen.line_width(hz_to_width(note.hz))
-        screen.level(length_to_level(note.length))
-        screen.circle(note.x, note.y, note.hz / 25)
-        screen.stroke()
-        screen.close()
-        note.length = note.length - 0.01
+
+        local base_level = note_to_level(note)
+        if base_level > 1 then
+          ripple(note, 1, 0, base_level)
+          ripple(note, 0.5, 2, math.floor(4 - note.fade) + 1)
+          ripple(note, 0.5, 3, math.floor(2 - note.fade) + 1)
+
+          note.length = note.length + 0.09
+          note.fade = note.fade + 0.05
+        end
       end
     end
   end
