@@ -6,13 +6,12 @@ local loop_end = 10
 local max_loop_length = 50
 local delay_end = 1
 
-engine.name = 'PolyPerc'
+engine.name = 'Snowflake'
 
 local rates_index = 4
 local rates = { 0.5, 1.0, 2.0, -0.5, -1.0, -2.0 }
 local screen_width = 128
 local screen_height = 64
-local longest_note = 16
 local lowest_gain = 0.3
 local sequencer1 = nil
 local sequencer2 = nil
@@ -22,22 +21,23 @@ local scale_options = nil
 local lfo_period = 240
 local max_lfo_period  = 2400
 local max_high_notes = 4
-local anim_state = {
-  change_one = {
-    active = false,
-    size = 0,
-    speed = 0.5
-  },
-  delay_speed = {
-    active = false,
-    size = 0,
-    speed = 0.5
-  }
+local hiss = 0.0
+local bits = 32
+local lofi_snowflakes = {
+  { hiss = 0, bits = 32 }, -- powder
+  { hiss = 5, bits = 8 },  -- melted
+  { hiss = 2, bits = 9 },  -- hail
+  { hiss = 3, bits = 12 }, -- slushy
+  { hiss = 1, bits = 12 }, -- crunchy
+  { hiss = 2, bits = 13 }, -- crystal
+  { hiss = 1, bits = 15 }, -- dendrite
 }
+local animations = {}
+local delay_speed_active = false
+local change_one_note_active = false
 
 local function softcut_setup()
   softcut.reset()
-
   audio.level_cut(1.0)
   audio.level_adc_cut(1)
   audio.level_eng_cut(1)
@@ -89,40 +89,38 @@ local function softcut_setup()
   softcut.filter_fc(2, 1200)
   softcut.filter_rq(2, 2.0)
 end
-local function change_one_note_animation()
-  clock.run(
-    function()
-      anim_state.change_one.size = 50
-      anim_state.change_one.level = 6
-      anim_state.change_one.x = 50 + math.random(1, 10)
-      anim_state.change_one.y = 40 + math.random(1, 10)
-      anim_state.change_one.active = true
-      while anim_state.change_one.size > 0 do
-        anim_state.change_one.size = anim_state.change_one.size - anim_state.change_one.speed
-        anim_state.change_one.level = util.clamp(anim_state.change_one.level - anim_state.change_one.speed, 1, 15)
-        clock.sleep(1 / 30)
-      end
-      anim_state.change_one.active = false
-    end
-  )
-end
 
-local function change_delay_speed_animation()
-  clock.run(
-    function()
-      anim_state.delay_speed.size = 80
-      anim_state.delay_speed.level = 6
-      anim_state.delay_speed.x = 50 + math.random(1, 10)
-      anim_state.delay_speed.y = 40 + math.random(1, 10)
-      anim_state.delay_speed.active = true
-      while anim_state.delay_speed.size > 0 do
-        anim_state.delay_speed.size = anim_state.delay_speed.size - anim_state.delay_speed.speed
-        anim_state.delay_speed.level = util.clamp(anim_state.delay_speed.level - anim_state.delay_speed.speed, 1, 15)
-        clock.sleep(1 / 30)
-      end
-      anim_state.delay_speed.active = false
+local function make_zoom_animation(draw, done)
+  local state = {
+    active = false,
+    size = 0,
+    speed = 0.5,
+    x = 0,
+    y = 0
+  }
+  return {
+    draw = function()
+      draw(state)
+    end,
+    run = function()
+      clock.run(
+        function()
+          state.size = 50
+          state.level = 6
+          state.x = 50 + math.random(1, 10)
+          state.y = 40 + math.random(1, 10)
+          state.active = true
+          while state.size > 0 do
+            state.size = state.size - state.speed
+            state.level = util.clamp(state.level - state.speed, 1, 15)
+            clock.sleep(1 / 30)
+          end
+          state.active = false
+          done()
+        end
+      )
     end
-  )
+  }
 end
 
 local function make_scale_options()
@@ -247,20 +245,11 @@ function redraw()
   screen.clear()
   screen.blend_mode(5)
   local margin = 30
-  if anim_state.change_one.active then
-    screen.level(math.floor(anim_state.change_one.level + 0.5))
-    screen.circle(anim_state.change_one.x, anim_state.change_one.y, anim_state.change_one.size)
-    screen.fill()
-    screen.close()
-  end
-  if anim_state.delay_speed.active then
-    screen.font_face(5)
-    screen.font_size(anim_state.delay_speed.size)
-    screen.move(anim_state.delay_speed.x, anim_state.delay_speed.y)
-    screen.level(math.floor(anim_state.delay_speed.level + 0.5))
-    screen.text("*")
-    screen.fill()
-    screen.close()
+  for i = 1, #animations do
+    local animation = animations[i]
+    if animation.draw() == false then
+      table.remove(animations, i)
+    end
   end
   for i = 1, #played_notes do
     for j = 1, #played_notes[i] do
@@ -314,19 +303,91 @@ local function change_delay_speed(d)
   softcut.rec(1, 0)
 end
 
+local function random_lofi_snowflake()
+  local i = math.random(1, #lofi_snowflakes)
+  local snowflake = lofi_snowflakes[i]
+  engine.bits(snowflake.bits)
+  engine.hiss(snowflake.hiss)
+end
+
+local function make_lofi_snowflake_animation()
+  local anim_index = #animations + 1
+  local animation = make_zoom_animation(
+    function(state)
+      screen.font_face(5)
+      screen.font_size(state.size)
+      screen.move(state.x, state.y)
+      screen.level(math.floor(state.level + 0.5))
+      screen.text("*")
+      screen.fill()
+      screen.close()
+    end,
+    function()
+      table.remove(animations, anim_index)
+    end
+  )
+  table.insert(animations, animation)
+  animation.run()
+end
+
+local function make_delay_animation()
+  delay_speed_active = true
+  local anim_index = #animations + 1
+  local animation = make_zoom_animation(
+    function(state)
+      screen.font_face(5)
+      screen.font_size(state.size)
+      screen.move(state.x, state.y)
+      screen.level(math.floor(state.level + 0.5))
+      screen.text("~")
+      screen.fill()
+      screen.close()
+    end,
+    function()
+      delay_speed_active = false
+      table.remove(animations, anim_index)
+    end
+  )
+  table.insert(animations, animation)
+  animation.run()
+end
+
+local function change_one_note_animation()
+  change_one_note_active = true
+  local anim_index = #animations + 1
+  local animation = make_zoom_animation(
+    function(state)
+      screen.level(math.floor(state.level + 0.5))
+      screen.circle(state.x, state.y, state.size)
+      screen.fill()
+      screen.close()
+    end,
+    function()
+      change_one_note_active = false
+      table.remove(animations, anim_index)
+    end
+  )
+  table.insert(animations, animation)
+  animation.run()
+end
+
 function enc(n, d)
   if n == 1 then
-    if math.random() > 0.7 and anim_state.delay_speed.active == false then
-      change_delay_speed_animation()
+    if math.random() > 0.7 and delay_speed_active == false then
+      make_delay_animation()
       change_delay_speed(d)
     end
   elseif n == 2 then
     lfo_period = util.wrap(lfo_period + d, 10, max_lfo_period)
     engine.pw(math.random())
+    if math.random() > 0.8 then
+      make_lofi_snowflake_animation()
+      random_lofi_snowflake()
+    end
   elseif n == 3 then
     local scale1 = scale_options[1]
     max_high_notes = util.wrap(max_high_notes + d, 0, math.floor(#scale1 / 3))
-    if math.random() > 0.7 and anim_state.change_one.active == false then
+    if math.random() > 0.7 and change_one_note_active == false then
       change_one_note_animation()
       change_one_note()
     end
@@ -337,9 +398,15 @@ local function screen_setup()
   screen.aa(1)
 end
 
+local function engine_setup()
+  engine.hiss(hiss)
+  engine.bits(bits)
+end
+
 function init()
   screen_setup()
   softcut_setup()
+  engine_setup()
 
   clock.run(
     function()
