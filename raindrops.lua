@@ -303,7 +303,7 @@ local function change_delay_speed(d)
   softcut.rec(1, 0)
   rates_index = math.random(1, #rates)
   softcut.rate(1, rates[rates_index])
-  softcut.rec(1, 0)
+  softcut.rec(1, 1)
 end
 
 local function random_lofi_snowflake()
