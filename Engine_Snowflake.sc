@@ -9,7 +9,6 @@ Engine_Snowflake : CroneEngine {
   var gain = 1;
   var bits = 32;
   var hiss = 0;
-  var mainOffset = 0.2;
   var sampleRate = 48000.0;
 
   *new { arg context, doneCallback;
@@ -32,7 +31,7 @@ Engine_Snowflake : CroneEngine {
         clampTime: 0.01,
         relaxTime: 0.1,
       ) * (hiss / 500);
-      Out.ar(out, Mix.new([decimate * mainOffset, duckedHiss]));
+      Out.ar(out, Mix.new([decimate, duckedHiss]));
     }).add;
 
     this.addCommand("hz", "f", { arg msg;

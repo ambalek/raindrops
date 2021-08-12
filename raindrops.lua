@@ -101,6 +101,7 @@ local function make_zoom_animation(draw, done)
   return {
     draw = function()
       draw(state)
+      return state.active
     end,
     run = function()
       clock.run(
@@ -116,7 +117,9 @@ local function make_zoom_animation(draw, done)
             clock.sleep(1 / 30)
           end
           state.active = false
-          done()
+          if done ~= nil then
+            done()
+          end
         end
       )
     end
@@ -247,7 +250,7 @@ function redraw()
   local margin = 30
   for i = 1, #animations do
     local animation = animations[i]
-    if animation.draw() == false then
+    if animation ~= nil and animation.draw() == false then
       table.remove(animations, i)
     end
   end
@@ -311,7 +314,6 @@ local function random_lofi_snowflake()
 end
 
 local function make_lofi_snowflake_animation()
-  local anim_index = #animations + 1
   local animation = make_zoom_animation(
     function(state)
       screen.font_face(5)
@@ -321,9 +323,6 @@ local function make_lofi_snowflake_animation()
       screen.text("*")
       screen.fill()
       screen.close()
-    end,
-    function()
-      table.remove(animations, anim_index)
     end
   )
   table.insert(animations, animation)
@@ -332,7 +331,6 @@ end
 
 local function make_delay_animation()
   delay_speed_active = true
-  local anim_index = #animations + 1
   local animation = make_zoom_animation(
     function(state)
       screen.font_face(5)
@@ -345,7 +343,6 @@ local function make_delay_animation()
     end,
     function()
       delay_speed_active = false
-      table.remove(animations, anim_index)
     end
   )
   table.insert(animations, animation)
@@ -354,7 +351,6 @@ end
 
 local function change_one_note_animation()
   change_one_note_active = true
-  local anim_index = #animations + 1
   local animation = make_zoom_animation(
     function(state)
       screen.level(math.floor(state.level + 0.5))
@@ -364,7 +360,6 @@ local function change_one_note_animation()
     end,
     function()
       change_one_note_active = false
-      table.remove(animations, anim_index)
     end
   )
   table.insert(animations, animation)
@@ -380,7 +375,7 @@ function enc(n, d)
   elseif n == 2 then
     lfo_period = util.wrap(lfo_period + d, 10, max_lfo_period)
     engine.pw(math.random())
-    if math.random() > 0.8 then
+    if math.random() > 0.87 then
       make_lofi_snowflake_animation()
       random_lofi_snowflake()
     end
