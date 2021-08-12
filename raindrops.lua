@@ -9,7 +9,7 @@ local delay_end = 1
 engine.name = 'Snowflake'
 
 local rates_index = 4
-local rates = { 0.5, 1.0, 2.0, -0.5, -1.0, -2.0 }
+local rates = { 0.5, 1.0, -0.5, -1.0 }
 local screen_width = 128
 local screen_height = 64
 local lowest_gain = 0.3
@@ -108,8 +108,8 @@ local function make_zoom_animation(draw, done)
         function()
           state.size = 50
           state.level = 6
-          state.x = 50 + math.random(1, 10)
-          state.y = 40 + math.random(1, 10)
+          state.x = 20 + math.random(1, 80)
+          state.y = 30 + math.random(1, 40)
           state.active = true
           while state.size > 0 do
             state.size = state.size - state.speed
@@ -301,7 +301,7 @@ local function change_delay_speed(d)
   loop_end = util.clamp(loop_end + d, 1, max_loop_length)
   softcut.loop_end(1, loop_end)
   softcut.rec(1, 0)
-  rates_index = util.wrap(rates_index + d, 1, #rates)
+  rates_index = math.random(1, #rates)
   softcut.rate(1, rates[rates_index])
   softcut.rec(1, 0)
 end
@@ -313,16 +313,19 @@ local function random_lofi_snowflake()
   engine.hiss(snowflake.hiss)
 end
 
+local function draw_text_anim(c, state)
+  screen.font_face(5)
+  screen.font_size(state.size)
+  screen.move(state.x, state.y)
+  screen.level(math.floor(state.level + 0.5))
+  screen.text(c)
+  screen.fill()
+end
+
 local function make_lofi_snowflake_animation()
   local animation = make_zoom_animation(
     function(state)
-      screen.font_face(5)
-      screen.font_size(state.size)
-      screen.move(state.x, state.y)
-      screen.level(math.floor(state.level + 0.5))
-      screen.text("*")
-      screen.fill()
-      screen.close()
+      draw_text_anim("*", state)
     end
   )
   table.insert(animations, animation)
@@ -333,13 +336,7 @@ local function make_delay_animation()
   delay_speed_active = true
   local animation = make_zoom_animation(
     function(state)
-      screen.font_face(5)
-      screen.font_size(state.size)
-      screen.move(state.x, state.y)
-      screen.level(math.floor(state.level + 0.5))
-      screen.text("~")
-      screen.fill()
-      screen.close()
+      draw_text_anim("~", state)
     end,
     function()
       delay_speed_active = false
@@ -356,7 +353,6 @@ local function change_one_note_animation()
       screen.level(math.floor(state.level + 0.5))
       screen.circle(state.x, state.y, state.size)
       screen.fill()
-      screen.close()
     end,
     function()
       change_one_note_active = false
