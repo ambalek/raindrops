@@ -1,13 +1,12 @@
--- luacheck: globals engine clock util screen softcut enc key audio init redraw
+-- luacheck: globals engine clock util screen softcut enc key audio init redraw midi params
 -- 𝔯𝔞𝔦𝔫𝔡𝔯𝔬𝔭𝔰
 local MusicUtil = require "musicutil"
 
-local loop_end = 10
 local max_loop_length = 50
-local delay_end = 1
 
 engine.name = 'Snowflake'
 
+local midi_device = nil
 local rates_index = 4
 local rates = { 0.5, 1.0, -0.5, -1.0 }
 local screen_width = 128
@@ -50,7 +49,7 @@ local function softcut_setup()
   softcut.rate(1, rates[rates_index])
   softcut.rate_slew_time(1, 0)
   softcut.loop_start(1, 0)
-  softcut.loop_end(1, loop_end)
+  softcut.loop_end(1, params:get("long_delay_time"))
   softcut.loop(1, 1)
   softcut.fade_time(1, 0.1)
   softcut.rec(1, 1)
@@ -74,7 +73,7 @@ local function softcut_setup()
   softcut.rate(2, 1.0)
   softcut.rate_slew_time(2, 0)
   softcut.loop_start(2, 0)
-  softcut.loop_end(2, delay_end)
+  softcut.loop_end(2, params:get("short_delay_time"))
   softcut.loop(2, 1)
   softcut.fade_time(2, 0.05)
   softcut.rec(2, 1)
@@ -140,8 +139,10 @@ local function get_chance(use_chance)
 end
 
 local function random_note(scale, use_chance)
+  local midi_note_number = scale[math.random(1, #scale - max_high_notes)]
   return {
-    hz = MusicUtil.note_num_to_freq(scale[math.random(1, #scale - max_high_notes)]),
+    hz = MusicUtil.note_num_to_freq(midi_note_number),
+    midi_note_number = midi_note_number,
     length = math.random(2, 8),
     pan = math.random(),
     gain = util.clamp(lowest_gain + math.random(), 0, 1),
@@ -184,8 +185,11 @@ local sequence = make_sequence()
 local function change_one_note()
   local seq = sequence[1]
   local scale1 = scale_options[1]
-  seq[math.random(1, #seq)].hz = MusicUtil.note_num_to_freq(
-    scale1[math.random(1, #scale1 - max_high_notes)]
+  local index = math.random(1, #seq)
+  local midi_note_number = scale1[math.random(1, #scale1 - max_high_notes)]
+  seq[index].midi_note_number = midi_note_number
+  seq[index].hz = MusicUtil.note_num_to_freq(
+    midi_note_number
   )
 end
 
@@ -196,9 +200,49 @@ local function played_note(d, i, note)
     played_notes[d][i].hz = note.hz
     played_notes[d][i].length = note.length
     played_notes[d][i].gain = note.gain
+    played_notes[d][i].velocity = math.floor(note.gain * 127)
     played_notes[d][i].fade = 0
   end
   played_notes[d][i].x = nil
+end
+
+local function use_midi()
+  return params:get("use_midi") == 1
+end
+
+local function make_sound()
+  return params:get("make_sound") == 1
+end
+
+local function panic()
+  if use_midi() then
+    for note = 1, 127 do
+      for channel = 1, 16 do
+        midi_device:note_off(note, 0, channel)
+      end
+    end
+  end
+end
+
+local function play(note, midi_channel)
+  if make_sound() then
+    engine.hz(note.hz)
+  end
+  if use_midi() then
+    midi_device:note_on(note.midi_note_number, note.velocity, params:get("midi_out_channel_" .. midi_channel))
+  end
+end
+
+local function schedule_note_off(note, midi_channel)
+  if use_midi() then
+    local ticks = note.length
+    clock.run(function()
+      for _ = 1, ticks do
+        clock.sync(1)
+      end
+      midi_device:note_off(note.midi_note_number, note.velocity, params:get("midi_out_channel_" .. midi_channel))
+    end)
+  end
 end
 
 local function tick(d, i, s)
@@ -216,7 +260,8 @@ local function tick(d, i, s)
         engine.release(note.length)
         engine.gain(note.gain)
         if math.random() < note.chance then
-          engine.hz(note.hz)
+          play(note, d)
+          schedule_note_off(note, d)
           played_note(d, i, note)
         end
         note.ticks = note.length
@@ -298,7 +343,8 @@ function key(n, z)
 end
 
 local function change_delay_speed(d)
-  loop_end = util.clamp(loop_end + d, 1, max_loop_length)
+  local loop_end = util.clamp(params:get("long_delay_time") + d, 1, max_loop_length)
+  params:set("long_delay_time", loop_end)
   softcut.loop_end(1, loop_end)
   softcut.rec(1, 0)
   rates_index = math.random(1, #rates)
@@ -394,7 +440,39 @@ local function engine_setup()
   engine.bits(bits)
 end
 
+local function setup_params()
+  params:add_separator("midi")
+  params:add_option("use_midi", "use midi", { "Yes", "No" }, 2)
+  local vports = {}
+  local function refresh_params_vports()
+    for i = 1, #midi.vports do
+      vports[i] = midi.vports[i].name ~= "none" and
+        util.trim_string_to_width(midi.vports[i].name, 70) or
+        tostring(i)..": [device]"
+    end
+  end
+  refresh_params_vports()
+  params:add_option("midi_out_device", "MIDI out", vports, 1)
+  params:set_action("midi_out_device", function(value)
+    midi_device = midi.connect(value)
+  end)
+  params:add_number("midi_out_channel_1", "midi out channel 1", 1, 16, 1)
+  params:add_number("midi_out_channel_2", "midi out channel 2", 1, 16, 1)
+
+  params:add_separator("sound")
+  params:add_option("make_sound", "make sound", { "Yes", "No" }, 1)
+
+  params:add_separator("delays")
+  params:add_taper("short_delay_time", "short delay", 1, 5, 1, 0.01, "sec")
+  params:set_action("short_delay_time", function(value) softcut.loop_end(2, value) end)
+  params:add_taper("long_delay_time", "long delay", 1, max_loop_length, 10, 0.1, "sec")
+  params:set_action("long_delay_time", function(value) softcut.loop_end(1, value) end)
+end
+
 function init()
+  setup_params()
+  midi_device = midi.connect(params:get("midi_out_device"))
+  panic()
   screen_setup()
   softcut_setup()
   engine_setup()
