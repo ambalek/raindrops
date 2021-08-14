@@ -1,5 +1,16 @@
+-- raindrops: generate sequences and lofi snowflakes
+-- 1.0.4 @ambalek
+-- https://llllllll.co/t/raindrops-simple-generative-synth-sequencer/47633
+--
+-- Controls:
+--
+-- Key 2: Randomize current scale
+-- Key 3: Stop and generate a new scale/melody
+-- Enc 1: Increase long buffer time, random chance of changing buffer speed
+-- Enc 2: Random pulse width value for melody, random 𝖑𝖔𝖋𝖎 𝖘𝖓𝖔𝖜𝖋𝖑𝖆𝖐𝖊𝖘 mode
+-- Enc 3: Change one of the notes randomly
+
 -- luacheck: globals engine clock util screen softcut enc key audio init redraw midi params
--- 𝔯𝔞𝔦𝔫𝔡𝔯𝔬𝔭𝔰
 local MusicUtil = require "musicutil"
 
 local max_loop_length = 50
