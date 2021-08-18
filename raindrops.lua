@@ -1,14 +1,20 @@
--- raindrops: generate sequences and lofi snowflakes
--- 1.0.4 @ambalek
--- https://llllllll.co/t/raindrops-simple-generative-synth-sequencer/47633
+-- raindrops: random melodies
+-- 2.0.0 @ambalek
+-- https://llllllll.co/t/47633
 --
 -- Controls:
 --
--- Key 2: Randomize current scale
--- Key 3: Stop and generate a new scale/melody
--- Enc 1: Increase long buffer time, random chance of changing buffer speed
--- Enc 2: Random pulse width value for melody, random 𝖑𝖔𝖋𝖎 𝖘𝖓𝖔𝖜𝖋𝖑𝖆𝖐𝖊𝖘 mode
--- Enc 3: Change one of the notes randomly
+-- Key 2: Randomize scale
+-- Key 3: Generate new melody
+-- Enc 1: Increase long buffer
+--        time, random chance
+--        of changing buffer
+--        speed
+-- Enc 2: Random pulse width
+--        value for melody,
+--        random bitcrush
+-- Enc 3: Change one of the
+--        notes randomly
 
 -- luacheck: globals engine clock util screen softcut enc key audio init redraw midi params
 local MusicUtil = require "musicutil"
@@ -17,6 +23,7 @@ local max_loop_length = 50
 
 engine.name = 'Snowflake'
 
+local sequence = nil
 local midi_device = nil
 local rates_index = 4
 local rates = { 0.5, 1.0, -0.5, -1.0 }
@@ -31,8 +38,6 @@ local scale_options = nil
 local lfo_period = 240
 local max_lfo_period  = 2400
 local max_high_notes = 4
-local hiss = 0.0
-local bits = 32
 local lofi_snowflakes = {
   { hiss = 0, bits = 32 }, -- powder
   { hiss = 5, bits = 8 },  -- melted
@@ -45,6 +50,11 @@ local lofi_snowflakes = {
 local animations = {}
 local delay_speed_active = false
 local change_one_note_active = false
+local all_notes = {}
+
+for i = 1, 127 do
+  table.insert(all_notes, MusicUtil.note_num_to_name(i, true))
+end
 
 local function softcut_setup()
   softcut.reset()
@@ -65,7 +75,7 @@ local function softcut_setup()
   softcut.fade_time(1, 0.1)
   softcut.rec(1, 1)
   softcut.rec_level(1, 1)
-  softcut.pre_level(1, 0.5)
+  softcut.pre_level(1, params:get("long_delay_feedback"))
   softcut.position(1, 0)
   softcut.enable(1, 1)
   softcut.filter_dry(1, 0)
@@ -89,7 +99,7 @@ local function softcut_setup()
   softcut.fade_time(2, 0.05)
   softcut.rec(2, 1)
   softcut.rec_level(2, 1)
-  softcut.pre_level(2, 0.5)
+  softcut.pre_level(2, params:get("short_delay_feedback"))
   softcut.position(2, 0)
   softcut.enable(2, 1)
   softcut.filter_dry(2, 0)
@@ -137,8 +147,11 @@ local function make_zoom_animation(draw, done)
 end
 
 local function make_scale_options()
-  local random_scale = scales[math.random(1, #scales)]
+  local scale_index = math.random(1, #scales)
+  local random_scale = scales[scale_index]
   local start_note = math.random(44, 68)
+  params:set("scale", scale_index)
+  params:set("root_note", start_note)
   return {
     MusicUtil.generate_scale(start_note, random_scale, 3),
     MusicUtil.generate_scale(start_note - 12, random_scale, 2)
@@ -186,12 +199,24 @@ local function generate_sequences()
   }
 end
 
+local function refresh_sequence()
+  local start_note = params:get("root_note")
+  local random_scale = scales[params:get("scale")]
+  local second_scale_start = start_note - 12
+  if second_scale_start < 1 then
+    second_scale_start = start_note + 12
+  end
+  scale_options = {
+    MusicUtil.generate_scale(start_note, random_scale, 3),
+    MusicUtil.generate_scale(second_scale_start, random_scale, 2)
+  }
+  return generate_sequences()
+end
+
 local function make_sequence()
   scale_options = make_scale_options()
   return generate_sequences()
 end
-
-local sequence = make_sequence()
 
 local function change_one_note()
   local seq = sequence[1]
@@ -368,6 +393,8 @@ local function random_lofi_snowflake()
   local snowflake = lofi_snowflakes[i]
   engine.bits(snowflake.bits)
   engine.hiss(snowflake.hiss)
+  params:set("bits", snowflake.bits)
+  params:set("hiss", snowflake.hiss)
 end
 
 local function draw_text_anim(c, state)
@@ -447,8 +474,9 @@ local function screen_setup()
 end
 
 local function engine_setup()
-  engine.hiss(hiss)
-  engine.bits(bits)
+  engine.pw(params:get("pw"))
+  engine.bits(params:get("bits"))
+  engine.hiss(params:get("hiss"))
 end
 
 local function setup_params()
@@ -476,12 +504,41 @@ local function setup_params()
   params:add_separator("delays")
   params:add_taper("short_delay_time", "short delay", 1, 5, 1, 0.01, "sec")
   params:set_action("short_delay_time", function(value) softcut.loop_end(2, value) end)
+  params:add_taper("short_delay_feedback", "short delay feedback", 0, 1, 0.5, 0.01)
   params:add_taper("long_delay_time", "long delay", 1, max_loop_length, 10, 0.1, "sec")
   params:set_action("long_delay_time", function(value) softcut.loop_end(1, value) end)
+  params:add_taper("long_delay_feedback", "long delay feedback", 0, 1, 0.5, 0.01)
+
+  params:add_separator("melodies")
+  params:add_option("scale", "scale", scales, math.random(1, #scales))
+  params:set_action("scale", function()
+    refresh_sequence()
+  end)
+  params:add_option("root_note", "root note", all_notes, math.random(44, 68))
+  params:set_action("root_note", function()
+    refresh_sequence()
+  end)
+
+  params:add_separator("snowflake engine")
+  params:add_taper("pw", "pulse width", 0, 1, 0.5, 0.01)
+  params:set_action("pw", function(value)
+    engine.pw(value)
+  end)
+  params:add_number("bits", "bits", 6, 32, 32)
+  params:set_action("bits", function(value)
+    engine.bits(value)
+  end)
+  params:add_taper("hiss", "hiss", 0.0, 6.0, 0.0, 0.01)
+  params:set_action("hiss", function(value)
+    engine.hiss(value)
+  end)
+  engine.bits(params:get("bits"))
+  engine.hiss(params:get("hiss"))
 end
 
 function init()
   setup_params()
+  sequence = make_sequence()
   midi_device = midi.connect(params:get("midi_out_device"))
   panic()
   screen_setup()
